@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import User from '../models/userModel.js';
 import { sendPasswordResetEmail, sendResetPasswordLink, sendVerificationEmail } from '../utils/emailer.js';
-import { generateAccessToken, generateRefreshToken, generateToken } from '../utils/token.js';
+import { generateAccessToken, generateRefreshToken, generateToken, isTokenExpired } from '../utils/token.js';
 import uploadImageCloudinary from '../utils/uploadImage.js';
 
 
@@ -376,5 +377,76 @@ export const resetPassword = async (req, res) => {
         });
     }
 };
+
+
+
+export const refreshAccessToken = async (req, res) => {
+    try {
+  
+      const { refreshToken } = req.cookies;
+  
+      if (!refreshToken) {
+        return res.status(400).json({
+          status: 400,
+          success: false,
+          message: "Refresh token not found",
+        });
+      }
+  
+      // Verify the refresh token
+      jwt.verify(refreshToken, process.env.JWT_REFRESH, async (err, decoded) => {
+        if (err) {
+          return res.status(403).json({
+            status: 403,
+            success: false,
+            message: "Invalid or expired refresh token",
+          });
+        }
+  
+        // If the refresh token is valid, extract user info from the decoded payload
+        const user = {
+          _id: decoded.userId,
+          email: decoded.email,
+          role: decoded.role
+        };
+  
+        // Generate a new access token and a new refresh token
+        const newAccessToken = await generateAccessToken(user);
+        const newRefreshToken = await generateRefreshToken(user);
+  
+        res.cookie('accessToken', newAccessToken, {
+          httpOnly: true, // Prevents JavaScript access to the cookie
+          secure: process.env.NODE_ENV === 'production', // Only sends cookie over HTTPS in production
+          sameSite: 'strict', // Protects against CSRF
+          maxAge: 15 * 60 * 1000, // 15 minutes in milliseconds
+        });
+  
+        res.cookie('refreshToken', newRefreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
+        });
+  
+        // Return the new tokens in the response
+        res.status(200).json({
+          status: 200,
+          success: true,
+          message: "Access token refreshed successfully",
+          result: {
+            accessToken: newAccessToken,
+            refreshToken: newRefreshToken
+          }
+        });
+      });
+    } catch (error) {
+      console.log(error);
+      res.status(500).json({
+        status: 500,
+        success: false,
+        message: "Failed to refresh access token",
+      });
+    }
+  };
 
 
