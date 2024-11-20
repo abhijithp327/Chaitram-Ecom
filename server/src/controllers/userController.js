@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/userModel.js';
-import { sendVerificationEmail } from '../utils/emailer.js';
-import { generateAccessToken, generateRefreshToken } from '../utils/token.js';
+import { sendPasswordResetEmail, sendResetPasswordLink, sendVerificationEmail } from '../utils/emailer.js';
+import { generateAccessToken, generateRefreshToken, generateToken } from '../utils/token.js';
 import uploadImageCloudinary from '../utils/uploadImage.js';
 
 
@@ -253,71 +253,128 @@ export const uploadAvatar = async (req, res) => {
 };
 
 
-// export const refreshAccessToken = async (req, res) => {
-//     try {
+export const updateUserDetails = async (req, res) => {
 
-//         const { refreshToken } = req.cookies;
+    try {
 
-//         if (!refreshToken) {
-//             return res.status(400).json({
-//                 status: 400,
-//                 success: false,
-//                 message: "Refresh token not found",
-//             });
-//         }
+        const userId = req.user.userId;
 
-//         // Verify the refresh token
-//         jwt.verify(refreshToken, process.env.JWT_REFRESH, (err, decoded) => {
-//             if (err) {
-//                 return res.status(403).json({
-//                     status: 403,
-//                     success: false,
-//                     message: "Invalid or expired refresh token",
-//                 });
-//             }
+        const { name, mobile } = req.body;
 
-//             // If the refresh token is valid, extract user info from the decoded payload
-//             const user = {
-//                 _id: decoded.userId,
-//                 email: decoded.email,
-//                 role: decoded.role
-//             };
+        const updateUser = await User.findByIdAndUpdate({ _id: userId }, { name, mobile }, { new: true }).select('-password -refresh_token -verify_email -reset_password_token -reset_password_token_expires_at');
 
-//             // Generate a new access token and a new refresh token
-//             const newAccessToken = generateAccessToken(user);
-//             const newRefreshToken = generateRefreshToken(user);
+        if (!updateUser) {
+            return res.status(404).json({
+                status: 404,
+                success: false,
+                message: "User not found",
+            });
+        };
 
-//             res.cookie('accessToken', newAccessToken, {
-//                 httpOnly: true, // Prevents JavaScript access to the cookie
-//                 secure: process.env.NODE_ENV === 'production', // Only sends cookie over HTTPS in production
-//                 sameSite: 'strict', // Protects against CSRF
-//                 maxAge: 15 * 60 * 1000, // 15 minutes in milliseconds
-//             });
+        res.status(200).json({
+            status: 200,
+            success: true,
+            message: "User details updated successfully",
+            result: updateUser
+        });
 
-//             res.cookie('refreshToken', newRefreshToken, {
-//                 httpOnly: true,
-//                 secure: process.env.NODE_ENV === 'production',
-//                 sameSite: 'strict',
-//                 maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
-//             });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            status: 500,
+            success: false,
+            message: "Failed to update user details",
+            error: error,
+        });
+    }
 
-//             // Return the new tokens in the response
-//             res.status(200).json({
-//                 status: 200,
-//                 success: true,
-//                 message: "Access token refreshed successfully",
-//                 result: {
-//                     accessToken: newAccessToken,
-//                     refreshToken: newRefreshToken
-//                 }
-//             });
-//         });
-//     } catch (error) {
-//         console.log(error);
-//         res.status(500).json({
-//             status: 500,
-//             success: false,
-//             message: "Failed to refresh access token",
-//         });
-//     }
-// };
+};
+
+
+export const forgotPassword = async (req, res) => {
+
+    try {
+
+        const { email } = req.body;
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 404,
+                success: false,
+                message: "User not found"
+            });
+        };
+
+        const token = generateToken();
+
+        const expiredAt = new Date(Date.now() + 3600);
+
+        await User.findByIdAndUpdate(user._id, {
+            reset_password_token: token,
+            reset_password_token_expires_at: expiredAt
+        })
+
+        await sendResetPasswordLink(email, token);
+
+        res.status(200).json({
+            status: 200,
+            success: true,
+            message: "Password reset link sent successfully",
+        });
+
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            status: 500,
+            success: false,
+            message: "Failed to send email",
+            error: error,
+        });
+    }
+};
+
+
+export const resetPassword = async (req, res) => {
+    try {
+
+        const { token, password } = req.body;
+
+        const user = await User.findOne({ reset_password_token: token });
+
+        if (!user || isTokenExpired(user.reset_token_expires_at)) {
+            return res.status(400).json({
+                status: 400,
+                success: false,
+                message: "Your session has expired. Please close this page and try again to reset your password."
+            });
+        };
+
+        const hashedPassword = await bcrypt.hash(password, 12);
+
+        await User.findByIdAndUpdate(user._id, {
+            password: hashedPassword,
+            reset_password_token: null,
+            reset_password_token_expires_at: null
+        });
+
+        await sendPasswordResetEmail(user.email);
+
+        res.status(200).json({
+            status: 200,
+            success: true,
+            message: "Password reset successfully"
+        });
+
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            status: 500,
+            success: false,
+            message: "Failed to reset password",
+        });
+    }
+};
+
+

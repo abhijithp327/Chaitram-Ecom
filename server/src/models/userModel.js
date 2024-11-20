@@ -65,20 +65,30 @@ const userSchema = new mongoose.Schema({
         ref: "order"
     }],
 
-    forgot_password_otp: {
-        type: String,
-        default: null
-    },
+    // forgot_password_otp: {
+    //     type: String,
+    //     default: null
+    // },
 
-    forgot_password_expiry: {
-        type: Date,
-        default: ""
-    },
+    // forgot_password_expiry: {
+    //     type: Date,
+    //     default: ""
+    // },
 
     role: {
         type: String,
         enum: ["ADMIN", "USER"],
         default: "USER"
+    },
+
+    reset_password_token: {
+        type: String,
+        default: null
+    },
+
+    reset_password_token_expires_at: {
+        type: Date,
+        default: null
     },
 
 },
